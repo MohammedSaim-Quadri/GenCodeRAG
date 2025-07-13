@@ -1,0 +1,35 @@
+# === Python artifacts ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# === Environment ===
+.venv/
+venv/
+env/
+ENV/
+.idea/
+.vscode/
+.DS_Store
+
+# === Secrets ===
+.env
+*.env
+
+# === Data Files ===
+data
+data/github_raw/
+data/chunks/
+data/faiss/
+datasets/
+*.jsonl
+*.bin
+*.index
+
+# === Hugging Face Cache ===
+~/.cache/huggingface/
+
+tests/
+test_afaf/
+

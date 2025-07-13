@@ -1,0 +1,50 @@
+from sentence_transformers import SentenceTransformer
+import json
+from pathlib import Path
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
+import uuid
+from dotenv import load_dotenv
+import os
+
+# === Load model ===
+print("🧠 Loading embedding model...")
+model = SentenceTransformer("all-MiniLM-L6-v2")
+
+# === Load code chunks ===
+CHUNK_FILE = Path("data/chunks/github_code_chunks.jsonl")
+print("📦 Reading code chunks...")
+chunks = [json.loads(line) for line in open(CHUNK_FILE, "r", encoding="utf-8")]
+texts = [chunk["code"] for chunk in chunks]
+
+# === Compute embeddings ===
+print(f"🔢 Computing embeddings for {len(texts)} chunks...")
+embeddings = model.encode(texts, batch_size=32, convert_to_numpy=True, show_progress_bar=True)
+
+# === Qdrant Setup ===
+load_dotenv()
+QDRANT_HOST = os.getenv("QDRANT_HOST", "http://localhost:6333")
+COLLECTION_NAME = "code_chunks"
+
+client = QdrantClient(url=QDRANT_HOST)
+
+# Create collection if it doesn't exist
+client.recreate_collection(
+    collection_name=COLLECTION_NAME,
+    vectors_config=VectorParams(size=embeddings.shape[1], distance=Distance.COSINE),
+)
+
+# === Upload to Qdrant ===
+print(f"📤 Uploading {len(embeddings)} vectors to Qdrant...")
+
+points = [
+    PointStruct(
+        id=str(uuid.uuid4()),
+        vector=embeddings[i],
+        payload=chunks[i]
+    )
+    for i in range(len(embeddings))
+]
+
+client.upsert(collection_name=COLLECTION_NAME, points=points)
+print("✅ Upload complete.")

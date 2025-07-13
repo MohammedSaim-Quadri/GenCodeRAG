@@ -1,0 +1,12 @@
+requests
+huggingface_hub
+datasets
+transformers
+peft
+tree_sitter
+tqdm
+python-dotenv
+#faiss-cpu
+sentence-transformers
+torch
+qdrant-client
