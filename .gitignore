@@ -33,3 +33,4 @@ datasets/
 tests/
 test_afaf/
 
+interactions_qdrant.jsonl

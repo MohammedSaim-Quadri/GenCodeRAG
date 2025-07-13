@@ -87,7 +87,11 @@ def process_all():
                 if ext not in extension_map:
                     continue
                 true_lang = extension_map[ext]
-                code = file.read_text(encoding="utf-8", errors="ignore")
+                try:
+                    code = file.read_text(encoding="utf-8", errors="ignore")
+                except (OSError, UnicodeDecodeError) as e:
+                    print(f"⚠️ Skipping file due to read error: {file} ({e})")
+                    continue
                 functions = []
 
                 if true_lang == "python":
