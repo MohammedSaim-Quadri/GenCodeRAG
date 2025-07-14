@@ -4,12 +4,12 @@ from pathlib import Path
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
-#from huggingface_hub import InferenceClient
+from huggingface_hub import InferenceClient
 from dotenv import load_dotenv
 import os
-import requests
+#import requests
 from typing import List, Dict, Any
-import time
+#import time
 from datetime import datetime
 
 # Load API token
@@ -22,9 +22,6 @@ print(f"Qdrant Token loaded: {'✓' if QDRANT_API_KEY else '✗'}")
 
 COLLECTION_NAME = "code_chunks"
 EMBED_MODEL = "all-MiniLM-L6-v2"
-
-API_URL = "https://router.huggingface.co/v1/chat/completions"
-HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
 
 # === Configuration ===
 LLM_MODEL = "deepseek-ai/DeepSeek-V3-0324"
@@ -65,7 +62,7 @@ def search_qdrant(query: str, language: str = None):
         "query_vector": query_vector,
         "limit": TOP_K * 3,
         "with_payload": True,
-        "score_threshold": 0.75
+        "score_threshold": 0.3
     }
 
     if filters:
@@ -251,51 +248,71 @@ def infer_language_from_prompt(prompt: str) -> str:
                 return lang
     return None 
 
-def query_hf_llm(prompt: str) -> str:
-    """Make API request with enhanced error handling and retry logic."""
-    payload = {
-        "model": LLM_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": TEMPERATURE,
-        "max_tokens": MAX_TOKENS,
-    }
+# def query_hf_llm(prompt: str) -> str:
+#     """Make API request with enhanced error handling and retry logic."""
+#     payload = {
+#         "model": LLM_MODEL,
+#         "messages": [{"role": "user", "content": prompt}],
+#         "temperature": TEMPERATURE,
+#         "max_tokens": MAX_TOKENS,
+#     }
     
-    print(f"📝 Context length: {len(prompt)} characters")
+#     print(f"📝 Context length: {len(prompt)} characters")
     
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            response = requests.post(API_URL, headers=HEADERS, json=payload, timeout=60)
+#     max_retries = 3
+#     for attempt in range(max_retries):
+#         try:
+#             response = requests.post(API_URL, headers=HEADERS, json=payload, timeout=60)
             
-            if response.status_code == 200:
-                result = response.json()
-                content = result["choices"][0]["message"]["content"]
+#             if response.status_code == 200:
+#                 result = response.json()
+#                 content = result["choices"][0]["message"]["content"]
                 
-                # Display usage stats if available
-                if "usage" in result:
-                    usage = result["usage"]
-                    print(f"📊 Tokens used: {usage.get('total_tokens', 'N/A')}")
+#                 # Display usage stats if available
+#                 if "usage" in result:
+#                     usage = result["usage"]
+#                     print(f"📊 Tokens used: {usage.get('total_tokens', 'N/A')}")
                 
-                return content
-            else:
-                print(f"❌ API Error {response.status_code}: {response.text}")
-                if attempt < max_retries - 1:
-                    print(f"🔄 Retrying... ({attempt + 1}/{max_retries})")
-                    time.sleep(2)
-                    continue
-                else:
-                    return f"Failed after {max_retries} attempts. Last error: {response.text}"
+#                 return content
+#             else:
+#                 print(f"❌ API Error {response.status_code}: {response.text}")
+#                 if attempt < max_retries - 1:
+#                     print(f"🔄 Retrying... ({attempt + 1}/{max_retries})")
+#                     time.sleep(2)
+#                     continue
+#                 else:
+#                     return f"Failed after {max_retries} attempts. Last error: {response.text}"
                     
-        except requests.exceptions.RequestException as e:
-            print(f"❌ Request Error: {e}")
-            if attempt < max_retries - 1:
-                print(f"🔄 Retrying... ({attempt + 1}/{max_retries})")
-                time.sleep(2)
-                continue
-            else:
-                return f"Request failed after {max_retries} attempts: {e}"
+#         except requests.exceptions.RequestException as e:
+#             print(f"❌ Request Error: {e}")
+#             if attempt < max_retries - 1:
+#                 print(f"🔄 Retrying... ({attempt + 1}/{max_retries})")
+#                 time.sleep(2)
+#                 continue
+#             else:
+#                 return f"Request failed after {max_retries} attempts: {e}"
     
-    return "Failed to get response from API"
+#     return "Failed to get response from API"
+
+def query_hf_llm(prompt: str) -> str:
+    """Query Hugging Face LLM using InferenceClient (Chat Completions)."""
+    print(f"📝 Context length: {len(prompt)} characters")
+
+    try:
+        client = InferenceClient(
+            provider="auto",
+            api_key=os.getenv("HF_TOKEN")
+        )
+        response = client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=TEMPERATURE,
+            max_tokens=MAX_TOKENS,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"❌ HF API Error: {e}")
+        return "⚠️ Failed to generate a response from the LLM."
 
 def log_interaction(query: str, language: str, response: str, chunk_ids):
     record = {

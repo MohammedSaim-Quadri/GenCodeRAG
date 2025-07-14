@@ -10,3 +10,4 @@ python-dotenv
 sentence-transformers
 torch
 qdrant-client
+streamlit
