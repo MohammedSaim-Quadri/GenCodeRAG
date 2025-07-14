@@ -26,8 +26,8 @@ EMBED_MODEL = "all-MiniLM-L6-v2"
 # === Configuration ===
 LLM_MODEL = "deepseek-ai/DeepSeek-V3-0324"
 TOP_K = 5
-TEMPERATURE = 0.7
-MAX_TOKENS = 1024
+TEMPERATURE = 0.4
+MAX_TOKENS = 2048
 
 # === Init clients ===
 qdrant = QdrantClient(url=QDRANT_HOST, api_key=QDRANT_API_KEY)
@@ -151,7 +151,7 @@ def create_enriched_prompt(query: str, chunks: List[Dict[str, Any]]) -> str:
     
     prompt_context = ""
     total_chars = 0
-    max_chars = 20000
+    max_chars = 12000
     for point in chunks:
         payload = point.payload
         lang = payload.get("language", "text")
@@ -308,6 +308,7 @@ def query_hf_llm(prompt: str) -> str:
             messages=[{"role": "user", "content": prompt}],
             temperature=TEMPERATURE,
             max_tokens=MAX_TOKENS,
+            top_p = 0.8
         )
         return response.choices[0].message.content
     except Exception as e:
