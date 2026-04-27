@@ -29,8 +29,7 @@ datasets/
 
 # === Hugging Face Cache ===
 ~/.cache/huggingface/
-
-tests/
+tests/debug/
 test_afaf/
 
 interactions_qdrant.jsonl
