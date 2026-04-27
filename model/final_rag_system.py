@@ -1,4 +1,3 @@
-#import faiss
 import json
 from pathlib import Path
 from sentence_transformers import SentenceTransformer
@@ -7,69 +6,101 @@ from qdrant_client.models import Filter, FieldCondition, MatchValue
 from huggingface_hub import InferenceClient
 from dotenv import load_dotenv
 import os
-#import requests
 from typing import List, Dict, Any
-#import time
 from datetime import datetime
+from logger import setup_logger
+from settings import settings
 
-# Load API token
-load_dotenv()
-HF_TOKEN = os.getenv("HF_TOKEN")
-print(f"Token loaded: {'✓' if HF_TOKEN else '✗'}")
-QDRANT_HOST = os.getenv("QDRANT_HOST")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-print(f"Qdrant Token loaded: {'✓' if QDRANT_API_KEY else '✗'}")
+logger = setup_logger(__name__)
 
-COLLECTION_NAME = "code_chunks"
-EMBED_MODEL = "all-MiniLM-L6-v2"
+qdrant = None
+embedder = None
+hf_client = None
 
-# === Configuration ===
-LLM_MODEL = "deepseek-ai/DeepSeek-V3-0324"
-TOP_K = 5
-TEMPERATURE = 0.4
-MAX_TOKENS = 2048
+def get_qdrant_client():
+    global qdrant
+    if qdrant is None:
+        logger.info("Initializing Qdrant client...")
+        qdrant = QdrantClient(
+            url = settings.QDRANT_HOST,
+            api_key=settings.QDRANT_API_KEY
+        )
+    return qdrant
 
-# === Init clients ===
-qdrant = QdrantClient(url=QDRANT_HOST, api_key=QDRANT_API_KEY)
-# === Load embedding model ===
-print("🔤 Loading embedding model...")
-embedder = SentenceTransformer(EMBED_MODEL)
-print("✓ Embedding model loaded")
+def get_embedder():
+    global embedder
 
-# === Load FAISS index and metadata ===
-# INDEX_PATH = "data/faiss/github_code.index"
-# META_PATH = "data/faiss/github_code.meta.json"
+    if embedder is None:
+        try:
+            logger.info(
+                f"Loading primary embedding model: "
+                f"{settings.PRIMARY_EMBED_MODEL}"
+            )
 
-# print("📦 Loading FAISS index + metadata...")
-# try:
-#     index = faiss.read_index(INDEX_PATH)
-#     with open(META_PATH, "r", encoding="utf-8") as f:
-#         metadata = json.load(f)
-#     print(f"✓ Loaded {index.ntotal} embeddings and {len(metadata)} metadata entries")
-# except Exception as e:
-#     print(f"❌ Error loading index/metadata: {e}")
-#     exit(1)
+            embedder = SentenceTransformer(
+                settings.PRIMARY_EMBED_MODEL
+            )
+
+        except Exception as e:
+            logger.warning(
+                f"Primary embedding model failed: {e}"
+            )
+
+            logger.info(
+                f"Falling back to: "
+                f"{settings.FALLBACK_EMBED_MODEL}"
+            )
+
+            embedder = SentenceTransformer(
+                settings.FALLBACK_EMBED_MODEL
+            )
+
+    return embedder
+
+def get_hf_client():
+    global hf_client
+    if hf_client is None:
+        logger.info("HF token loaded successfully")
+        hf_client = InferenceClient(
+            provider="auto",
+            api_key=settings.HF_TOKEN
+        )
+    
+    return hf_client
 
 def search_qdrant(query: str, language: str = None):
-    query_vector = embedder.encode(query).tolist()
+    try:
+        embedder = get_embedder()
+        qdrant = get_qdrant_client()
 
-    filters = []
-    if language:
-        filters.append(FieldCondition(key="language", match=MatchValue(value=language)))
+        query_vector = embedder.encode(query).tolist()
 
-    search_kwargs = {
-        "collection_name": COLLECTION_NAME,
-        "query_vector": query_vector,
-        "limit": TOP_K * 3,
-        "with_payload": True,
-        "score_threshold": 0.3
-    }
+        search_kwargs = {
+            "collection_name": settings.COLLECTION_NAME,
+            "query_vector": query_vector,
+            "limit": settings.TOP_K * 3,
+            "score_threshold": settings.SCORE_THRESHOLD
+        }
 
-    if filters:
-        search_kwargs["query_filter"] = Filter(must=filters)
+        if language:
+            search_kwargs["query_filter"] = {
+                "must": [
+                    {
+                        "key": "language",
+                        "match": {
+                            "value": language
+                        }
+                    }
+                ]
+            }
 
-    return qdrant.search(**search_kwargs)
+        results = qdrant.search(**search_kwargs)
 
+        return results[:settings.TOP_K]
+
+    except Exception as e:
+        logger.error(f"Qdrant error: {e}")
+        return []
 
 def format_code_snippet(code: str, max_lines: int = 50) -> str:
     """Format and truncate code snippets for better readability."""
@@ -77,74 +108,6 @@ def format_code_snippet(code: str, max_lines: int = 50) -> str:
     if len(lines) > max_lines:
         lines = lines[:max_lines] + ['...', '# Code truncated for brevity']
     return '\n'.join(lines)
-
-# def extract_language_from_path(path: str) -> str:
-#     """Extract programming language from file path."""
-#     extension_map = {
-#         '.py': 'python', '.js': 'javascript', '.ts': 'typescript',
-#         '.java': 'java', '.cpp': 'cpp', '.c': 'c', '.cs': 'csharp',
-#         '.go': 'go', '.rs': 'rust', '.php': 'php', '.rb': 'ruby',
-#         '.swift': 'swift', '.kt': 'kotlin', '.scala': 'scala',
-#         '.sql': 'sql', '.html': 'html', '.css': 'css', '.sh': 'bash',
-#         '.m': 'objective-c', '.jl': 'julia', '.lua': 'lua',
-#         '.dart': 'dart', '.r': 'r', '.pl': 'perl', '.json': 'json'
-# }
-#     ext = Path(path).suffix.lower()
-#     return extension_map.get(ext, 'text')
-
-# def deduplicate_chunks(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-#     """Remove duplicate code chunks based on content similarity."""
-#     seen_codes = set()
-#     unique_chunks = []
-    
-#     for chunk in chunks:
-#         # Create a simple hash of the code content
-#         code_hash = hash(chunk['code'][:200])  # Use first 200 chars for comparison
-#         if code_hash not in seen_codes:
-#             seen_codes.add(code_hash)
-#             unique_chunks.append(chunk)
-    
-#     return unique_chunks
-
-# def enhance_retrieval(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-#     """Enhanced retrieval with filtering and ranking."""
-#     print(f"\n🔍 Searching for relevant code (top-{top_k})...")
-    
-#     # Encode query
-#     query_embed = embed_model.encode([query])
-    
-#     # Search with higher k to allow filtering
-#     search_k = min(top_k * 3, len(metadata))
-#     D, I = index.search(query_embed, search_k)
-    
-#     # Filter and enrich results
-#     enhanced_chunks = []
-#     for idx, (distance, meta_idx) in enumerate(zip(D[0], I[0])):
-#         if meta_idx >= len(metadata):
-#             continue
-            
-#         meta = metadata[meta_idx]
-#         similarity = 1 - distance  # Convert distance to similarity
-        
-#         # Filter by similarity threshold
-#         if similarity < CONFIG["similarity_threshold"]:
-#             continue
-            
-#         # Enhance metadata
-#         enhanced_meta = {
-#             **meta,
-#             "similarity": round(similarity, 3),
-#             "language": extract_language_from_path(meta.get("path", "")),
-#             "rank": idx + 1,
-#             "formatted_code": format_code_snippet(meta["code"])
-#         }
-        
-#         enhanced_chunks.append(enhanced_meta)
-    
-#     # Remove duplicates and limit to top_k
-#     unique_chunks = deduplicate_chunks(enhanced_chunks)[:top_k]
-    
-#     return unique_chunks
 
 def create_enriched_prompt(query: str, chunks: List[Dict[str, Any]]) -> str:
     """Create a more sophisticated prompt with better context organization."""
@@ -169,19 +132,8 @@ Function: {func}
             break
         prompt_context += snippet
         total_chars += len(snippet)
-    #         # Check if adding this chunk would exceed context limit
-    #         if total_length + len(chunk_context) > CONFIG["max_context_length"]:
-    #             break
-                
-    #         lang_section += chunk_context
-    #         total_length += len(chunk_context)
-        
-    #     context_sections.append(lang_section)
-    
-    # # Combine all sections
-    # full_context = "\n".join(context_sections)
-    
-    # Create the final prompt
+
+    safe_query = query.replace("{", "").replace("}", "")
     prompt = f"""You are an expert developer.
 
 Use the following code snippets to generate a solution for the task.
@@ -190,7 +142,7 @@ Use the following code snippets to generate a solution for the task.
 {prompt_context}
 
 # TASK:
-{query}
+{safe_query}
 
 # INSTRUCTIONS:
 - Analyze the provided code examples for patterns and best practices
@@ -207,6 +159,7 @@ Use the following code snippets to generate a solution for the task.
 def display_retrieval_results(chunks: List[Dict[str, Any]]):
     """Display enhanced retrieval results."""
     print(f"\\n📊 Found {len(chunks)} relevant code examples:")
+    logger.info(f"Found {len(chunks)} relevant code examples for the query.")
     print("-" * 80)
     for i, chunk in enumerate(chunks, 1):
         payload = chunk.payload
@@ -216,6 +169,7 @@ def display_retrieval_results(chunks: List[Dict[str, Any]]):
         language = payload.get("language", "text")
         score = getattr(chunk, "score", 1.0)
         print(f"{i}. [{language.upper()}] {repo}/{path}")
+        logger.info(f"Retrieved chunk {i}: {repo}/{path} (Function: {func_name}, Score: {score:.2%})")
         print(f"   Function: {func_name}")
         print(f"   Similarity: {score:.1%}")
         print(f"   Code Length: {len(payload['code'])} chars")
@@ -248,71 +202,22 @@ def infer_language_from_prompt(prompt: str) -> str:
                 return lang
     return None 
 
-# def query_hf_llm(prompt: str) -> str:
-#     """Make API request with enhanced error handling and retry logic."""
-#     payload = {
-#         "model": LLM_MODEL,
-#         "messages": [{"role": "user", "content": prompt}],
-#         "temperature": TEMPERATURE,
-#         "max_tokens": MAX_TOKENS,
-#     }
-    
-#     print(f"📝 Context length: {len(prompt)} characters")
-    
-#     max_retries = 3
-#     for attempt in range(max_retries):
-#         try:
-#             response = requests.post(API_URL, headers=HEADERS, json=payload, timeout=60)
-            
-#             if response.status_code == 200:
-#                 result = response.json()
-#                 content = result["choices"][0]["message"]["content"]
-                
-#                 # Display usage stats if available
-#                 if "usage" in result:
-#                     usage = result["usage"]
-#                     print(f"📊 Tokens used: {usage.get('total_tokens', 'N/A')}")
-                
-#                 return content
-#             else:
-#                 print(f"❌ API Error {response.status_code}: {response.text}")
-#                 if attempt < max_retries - 1:
-#                     print(f"🔄 Retrying... ({attempt + 1}/{max_retries})")
-#                     time.sleep(2)
-#                     continue
-#                 else:
-#                     return f"Failed after {max_retries} attempts. Last error: {response.text}"
-                    
-#         except requests.exceptions.RequestException as e:
-#             print(f"❌ Request Error: {e}")
-#             if attempt < max_retries - 1:
-#                 print(f"🔄 Retrying... ({attempt + 1}/{max_retries})")
-#                 time.sleep(2)
-#                 continue
-#             else:
-#                 return f"Request failed after {max_retries} attempts: {e}"
-    
-#     return "Failed to get response from API"
-
 def query_hf_llm(prompt: str) -> str:
     """Query Hugging Face LLM using InferenceClient (Chat Completions)."""
     print(f"📝 Context length: {len(prompt)} characters")
 
     try:
-        client = InferenceClient(
-            provider="auto",
-            api_key=os.getenv("HF_TOKEN")
-        )
+        client = get_hf_client()
         response = client.chat.completions.create(
-            model=LLM_MODEL,
+            model=settings.LLM_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            temperature=TEMPERATURE,
-            max_tokens=MAX_TOKENS,
+            temperature=settings.TEMPERATURE,
+            max_tokens=settings.MAX_TOKENS,
             top_p = 0.8
         )
         return response.choices[0].message.content
     except Exception as e:
-        print(f"❌ HF API Error: {e}")
+        logger.error(f"❌ HF API Error: {e}")
         return "⚠️ Failed to generate a response from the LLM."
 
 def log_interaction(query: str, language: str, response: str, chunk_ids):
@@ -325,7 +230,7 @@ def log_interaction(query: str, language: str, response: str, chunk_ids):
     }
 
     with open("interactions_qdrant.jsonl", "a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\\n")
+        f.write(json.dumps(record) + "\n")
 
 # === Main Execution ===
 def main():
@@ -336,15 +241,19 @@ def main():
     
     if not query.strip():
         print("❌ Empty query. Please try again.")
+        logger.warning("User entered an empty query.")
         return
     
     language = infer_language_from_prompt(query)
     if language:
         print(f"🌐 Detected language from prompt: {language}")
+        logger.info(f"Detected language from prompt: {language}")
     else:
         print("🌐 No specific language detected. Using all contexts.")
+        logger.info("No specific language detected from prompt.")
     
     print("🔍 Searching Qdrant for relevant code chunks...")
+    logger.info("Initiating search in Qdrant for relevant code chunks.")
     results = search_qdrant(query, language)
     
     # Display results
@@ -359,6 +268,7 @@ def main():
     # Display response
     print("\n" + "=" * 80)
     print("🧠 GENERATED CODE:")
+    logger.info("Generated code response received from LLM.")
     print("=" * 80)
     print(response)
     
@@ -366,6 +276,7 @@ def main():
     chunk_ids = [r.payload.get("chunk_id") for r in results]
     log_interaction(query, language, response, chunk_ids)
     print("📦 Interaction logged successfully.")
+    logger.info("Interaction logged successfully.")
 
 if __name__ == "__main__":
     main()

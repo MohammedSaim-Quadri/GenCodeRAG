@@ -1,3 +1,13 @@
+"""
+Legacy FAISS-based embedding pipeline.
+
+This file is archived because the project now uses Qdrant
+as the primary vector database for retrieval.
+
+Kept only for historical reference and experimentation.
+Not used in active production flow.
+"""
+
 from sentence_transformers import SentenceTransformer
 import json
 import faiss

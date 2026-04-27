@@ -1,24 +1,65 @@
 import streamlit as st
 import json
 import os
-from pathlib import Path
-import sys
-
-# Add root for import access
-sys.path.append(str(Path(__file__).parent.parent))
-
 from model.final_rag_system import (
     search_qdrant, create_enriched_prompt, query_hf_llm,
     infer_language_from_prompt, log_interaction
 )
 
 from dotenv import load_dotenv
+from logger import setup_logger
+logger = setup_logger(__name__)
 load_dotenv()
 
 st.set_page_config(page_title="GenCodeRAG", layout="wide")
 
 # App title
 st.title("🧠 GenCodeRAG: AI Code Generation using GitHub + RAG")
+def validate_user_query(query: str):
+    blocked_patterns = [
+        "ignore previous instructions",
+        "ignore all instructions",
+        "reveal system prompt",
+        "show hidden prompt",
+        "disregard previous directions",
+        "bypass security",
+        "override instructions",
+        "act as system",
+        "jailbreak"
+    ]
+
+    query_lower = query.lower()
+
+    if len(query.strip()) < 5:
+        return False, "❌ Prompt is too short."
+
+    if len(query) > 500:
+        return False, "❌ Prompt too long. Please keep it under 500 characters."
+
+    for pattern in blocked_patterns:
+        if pattern in query_lower:
+            return False, (
+                "❌ Prompt contains restricted instructions "
+                "that are not allowed."
+            )
+
+    return True, ""
+
+def clean_llm_response(response):
+    if not response:
+        return ""
+
+    response = response.strip()
+
+    if response.startswith("```"):
+        lines = response.splitlines()
+
+        if len(lines) >= 3:
+            lines = lines[1:-1]
+
+        response = "\n".join(lines)
+
+    return response.strip()
 
 # Input prompt
 query = st.text_area(
@@ -28,36 +69,86 @@ query = st.text_area(
 )
 
 # Submit button
-if st.button("🚀 Generate Code"):
+if "is_generating" not in st.session_state:
+    st.session_state.is_generating = False
+
+if st.button(
+    "🚀 Generate Code",
+    disabled=st.session_state.is_generating
+):
+    st.session_state.is_generating = True
     if query.strip():
-        # Auto language detection
-        language = infer_language_from_prompt(query)
-        with st.spinner("🔍 Retrieving relevant code chunks..."):
-            results = search_qdrant(query, language)
+        try:
+            is_valid, error_message = validate_user_query(query)
 
-        if results:
-            # Log and display context
-            st.success(f"✅ Retrieved {len(results)} relevant code examples")
-            with st.expander("📚 Context Used (Top 3)"):
-                for i, r in enumerate(results[:3], 1):
-                    payload = r.payload
-                    st.markdown(f"**{i}. {payload.get('repo')} / {payload.get('path')}**")
-                    st.code(payload.get('code', '')[:300] + '...', language=payload.get("language", "text"))
+            if not is_valid:
+                logger.warning(
+                    f"Blocked suspicious prompt attempt: {query[:100]}"
+                )
 
-            # Generate final response
-            with st.spinner("🧠 Generating code..."):
-                prompt = create_enriched_prompt(query, results)
-                response = query_hf_llm(prompt)
-                chunk_ids = [r.payload.get("chunk_id") for r in results]
-                log_interaction(query, language, response, chunk_ids)
+                st.error(error_message)
+                st.session_state.is_generating = False
+                st.stop()
 
-            # Show output
-            st.subheader("🧠 Generated Code")
-            st.code(response, language=language or "text")
-        else:
-            st.warning("⚠️ No relevant examples found.")
+            # Auto language detection
+            language = infer_language_from_prompt(query)
+
+            with st.spinner("🔍 Retrieving relevant code chunks..."):
+                results = search_qdrant(query, language)
+
+            if results:
+                st.success(f"✅ Retrieved {len(results)} relevant code examples")
+
+                with st.expander("📚 Context Used (Top 3)"):
+                    for i, r in enumerate(results[:3], 1):
+                        payload = r.payload
+                        st.markdown(
+                            f"**{i}. {payload.get('repo')} / {payload.get('path')}**"
+                        )
+                        st.code(
+                            payload.get('code', '')[:300] + '...',
+                            language=payload.get("language", "text")
+                        )
+
+                with st.spinner("🧠 Generating code..."):
+                    prompt = create_enriched_prompt(query, results)
+                    response = query_hf_llm(prompt)
+                    response = clean_llm_response(response)
+
+                    chunk_ids = [
+                        r.payload.get("chunk_id")
+                        for r in results
+                    ]
+
+                    log_interaction(
+                        query,
+                        language,
+                        response,
+                        chunk_ids
+                    )
+
+                st.subheader("🧠 Generated Code")
+
+                if "def " in response or "class " in response or "function" in response:
+                    st.code(response, language=language or "text")
+                else:
+                    st.markdown(response)
+
+            else:
+                st.warning(
+                    "⚠️ No relevant examples were found. "
+                    "Try a more specific prompt, or verify your Qdrant collection is populated."
+                )
+
+        except Exception as e:
+            st.error(f"❌ Something went wrong: {str(e)}")
+
+        finally:
+            st.session_state.is_generating = False
+
     else:
         st.error("❌ Please enter a valid prompt.")
+        st.session_state.is_generating = False
 
 # Footer
 st.markdown("---")

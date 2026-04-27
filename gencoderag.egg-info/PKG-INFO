@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: gencoderag
+Version: 0.1.0
+Summary: AI Code Generation using GitHub + RAG
+Author: FNU Abdul Aziz, Afaf Ahmed Khan
+Requires-Python: >=3.10

@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gencoderag"
+version = "0.1.0"
+description = "AI Code Generation using GitHub + RAG"
+authors = [
+    {name = "FNU Abdul Aziz"},
+    {name = "Afaf Ahmed Khan"}
+]
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+where = ["."]

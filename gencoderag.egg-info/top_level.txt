@@ -1,0 +1,11 @@
+app
+backend
+data
+datasets
+legacy
+model
+pipeline
+qdrant
+test_afaf
+tests
+venv
