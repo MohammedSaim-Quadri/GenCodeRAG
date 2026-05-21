@@ -12,3 +12,4 @@ torch==2.7.0
 qdrant-client==1.14.2
 streamlit==1.44.1
 pydantic-settings==2.8.1
+litellm==1.40.0
