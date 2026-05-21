@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     STARS: int = 500
     MAX_FILES_PER_REPO: int = 20
 
+    # LLM Provider
+    LLM_PROVIDER: str = "huggingface"   # options: "huggingface", "ollama"
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "qwen2.5-coder:7b-instruct"
+
     class Config:
         env_file = ".env"
         case_sensitive = True
