@@ -1,15 +1,31 @@
 import streamlit as st
 import json
 import os
-from model.final_rag_system import (
-    search_qdrant, create_enriched_prompt, query_hf_llm,
-    infer_language_from_prompt, log_interaction
-)
+from qdrant_client import QdrantClient
+from core.retrieval import RetrievalService, InteractionLogger
+from core.embeddings import EmbeddingService
+from core.llm import LLMService
+from core.prompts import create_enriched_prompt, infer_language_from_prompt
+from settings import settings
 
 from dotenv import load_dotenv
 from logger import setup_logger
 logger = setup_logger(__name__)
 load_dotenv()
+
+@st.cache_resource
+def get_retrieval_service() -> RetrievalService:
+    embedder = EmbeddingService()
+    client = QdrantClient(
+        url=settings.QDRANT_HOST,
+        api_key=settings.QDRANT_API_KEY
+    )
+    return RetrievalService(client=client, embedder=embedder)
+
+
+@st.cache_resource
+def get_llm_service() -> LLMService:
+    return LLMService()
 
 st.set_page_config(page_title="GenCodeRAG", layout="wide")
 
@@ -94,7 +110,7 @@ if st.button(
             language = infer_language_from_prompt(query)
 
             with st.spinner("🔍 Retrieving relevant code chunks..."):
-                results = search_qdrant(query, language)
+                results = get_retrieval_service().search(query, language)
 
             if results:
                 st.success(f"✅ Retrieved {len(results)} relevant code examples")
@@ -112,7 +128,7 @@ if st.button(
 
                 with st.spinner("🧠 Generating code..."):
                     prompt = create_enriched_prompt(query, results)
-                    response = query_hf_llm(prompt)
+                    response = get_llm_service().complete(prompt)
                     response = clean_llm_response(response)
 
                     chunk_ids = [
@@ -120,12 +136,7 @@ if st.button(
                         for r in results
                     ]
 
-                    log_interaction(
-                        query,
-                        language,
-                        response,
-                        chunk_ids
-                    )
+                    InteractionLogger().log(query, language, response, chunk_ids)
 
                 st.subheader("🧠 Generated Code")
 
