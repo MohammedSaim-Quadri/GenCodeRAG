@@ -342,6 +342,7 @@ GenCodeRAG/
 │   └── streamlit_app.py           # Streamlit frontend
 │
 ├── pipeline/
+│   ├── __init__.py
 │   ├── github_scraper.py
 │   ├── clean_code.py
 │   ├── parser_utils.py
