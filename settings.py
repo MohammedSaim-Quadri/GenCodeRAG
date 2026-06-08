@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5-coder:7b-instruct"
 
+    REPO_WORKSPACE_DIR: str = "workspace"
+    MAX_FILE_SIZE_BYTES: int = 100_000 
+
     class Config:
         env_file = ".env"
         case_sensitive = True
